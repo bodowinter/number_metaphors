@@ -1,0 +1,201 @@
+---
+title: "Number metaphor analysis"
+author: "Bodo"
+date: "23/05/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Setup
+
+Load packages:
+
+```{r, warning = FALSE, message = FALSE}
+library(tidyverse)
+```
+
+Define target nouns:
+
+```{r}
+nouns <- c('number', 'amount', 'proportion',
+           'percentage', 'quantity', 'standard',
+           'volume', 'cost', 'profit', 'income',
+           'grade', 'loss', 'tax', 'benefit',
+           'rate', 'gain', 'salary', 'pay',
+           'revenue', 'earning')
+```
+
+Define adjectives combined with them. Do this for vertical and size based separately:
+
+```{r}
+verts <- c('high', 'higher', 'highest',
+           'low', 'lower', 'lowest')
+sizes <- c('small', 'smaller', 'smallest',
+           'big', 'bigger', 'biggest',
+           'large', 'larger', 'largest',
+           'tiny', 'tinier', 'tiniest',   # sounds weird but for parallelism
+           'huge', 'huger', 'hugest') # sounds weird but for parallelism
+
+# Put them together:
+
+adjs <- c(verts, sizes)
+```
+
+Do the same for deverbal adjectives (these tend to have a dynamic component):
+(some inspiration from https://www.aclweb.org/anthology/W16-6606.pdf[https://www.aclweb.org/anthology/W16-6606.pdf])
+
+```{r}
+verts <- c('rising', 'falling',
+           'climbing',
+           'ascending', 'descending',
+           'plunging', 'plummeting',
+           'soaring', 'dipping', 'dropping',
+           'slumping',
+           'surging', 'skyrocketing')
+neutral <- c('growing', 'shrinking',
+             'increasing', 'decreasing')
+deverbs <- c(verts, neutral)
+```
+
+## Setup objects for loop
+
+Create empty data frame to be filled:
+
+```{r}
+# All adjective-noun combinations:
+
+adj_targets <- expand.grid(adjs, nouns)
+
+# Make to tibble, rename columns, and get a combined column:
+
+adj_targets <- as_tibble(adj_targets) %>% 
+  rename(adj = Var1, noun = Var2) %>% 
+  mutate(adj_noun = str_c(adj, ' ', noun))
+
+# Append empty frequency column to be filled:
+
+adj_targets$freq <- numeric(nrow(adj_targets))
+
+# Check:
+
+sample_n(adj_targets, 10)
+```
+
+Setup target file with deverbal adjective-noun combinations:
+
+```{r}
+# All adjective-noun combinations:
+
+deverb_targets <- expand.grid(deverbs, nouns)
+
+# Make to tibble, rename columns, and get a combined column:
+
+deverb_targets <- as_tibble(deverb_targets) %>% 
+  rename(adj = Var1, noun = Var2) %>% 
+  mutate(adj_noun = str_c(adj, ' ', noun))
+
+# Append empty frequency column to be filled:
+
+deverb_targets$freq <- numeric(nrow(deverb_targets))
+
+# Check:
+
+sample_n(deverb_targets, 10)
+```
+
+Get the file locations into a vector:
+
+```{r}
+spk_files <- list.files('../../COCA_spoken')
+
+# Check:
+
+spk_files
+```
+
+Extract just the totals for each term to compute PMI:
+
+```{r}
+totals <- tibble(word = c(adjs, nouns, deverbs))
+
+# Empty frequency column:
+
+totals$freq <- numeric(nrow(totals))
+
+# Check:
+
+sample_n(totals, 4)
+```
+
+And get the overall word counts:
+
+```{r}
+corpus_size <- tibble(file = spk_files)
+
+# Empty frequency column:
+
+corpus_size$freq <- numeric(nrow(corpus_size))
+
+# Check:
+
+sample_n(corpus_size, 4)
+```
+
+## Loop through files
+
+```{r}
+for (i in seq_along(spk_files)) {
+  # Tell the outside world where you're at:
+  
+  cat(str_c('Starting file ', i, ' of ', length(spk_files), '\n'))
+  
+  # Get text file into character vector object:
+  
+  this_file <- suppressWarnings(readLines(str_c('../../COCA_spoken/', spk_files[i])))
+  
+  # # Save overall word count (the number of separators plus 1):
+  # 
+  # corpus_size[i, ]$freq <- sum(lengths(gregexpr('\\W+', this_file)) + 1)
+  # 
+  # # Save totals:
+  
+  for (j in 1:nrow(totals)) {
+    this_total <- totals[j, ]$word
+    this_sum <- sum(str_count(this_file, this_total))
+    totals[j, ]$freq <- totals[j, ]$freq + this_sum
+  }
+  
+  # # Get the frequencies of adjective-noun combinations:
+  # 
+  # for (k in 1:nrow(adj_targets)) {
+  #   this_adj_noun <- adj_targets[k, ]$adj_noun
+  #   this_sum <- sum(str_count(this_file, this_adj_noun))
+  #   adj_targets[k, ]$freq <- adj_targets[k, ]$freq + this_sum
+  # }
+  # 
+  # # Get the frequencies of deverbal noun phrase combinations:
+  # 
+  # for (k in 1:nrow(deverb_targets)) {
+  #   this_adj_noun <- deverb_targets[k, ]$adj_noun
+  #   this_sum <- sum(str_count(this_file, this_adj_noun))
+  #   deverb_targets[k, ]$freq <- deverb_targets[k, ]$freq + this_sum
+  # }
+  # 
+  
+}
+```
+
+Write this file to folder:
+
+```{r}
+write_csv(totals, '../data/totals.csv')
+write_csv(corpus_size, '../data/corpus_size.csv')
+write_csv(adj_targets, '../data/adj_noun_spk_generic.csv')
+write_csv(deverb_targets, '../data/deverb_noun_spk_generic.csv')
+```
+
+
+

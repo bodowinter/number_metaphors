@@ -1,0 +1,425 @@
+---
+title: "Play with metaphors"
+author: "Bodo"
+date: "23/05/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Load packages and data:
+
+Load packages:
+
+```{r, warning = FALSE, message = FALSE}
+library(tidyverse)
+library(ggcorrplot)
+```
+
+Load data:
+
+```{r, warning = FALSE, message = FALSE}
+totals <- read_csv('../data/totals.csv')
+corpus_size <- read_csv('../data/corpus_size.csv')
+adj_noun <- read_csv('../data/adj_noun_spk_generic.csv')
+deverbs <- read_csv('../data/deverb_noun_spk_generic.csv')
+```
+
+Show each:
+
+```{r}
+# Totals (adjective and noun overall frequency):
+
+sample_n(totals, 4)
+
+# Size of individual files:
+
+sample_n(corpus_size, 4)
+
+# Adjective-noun combinations:
+
+sample_n(adj_noun, 4)
+
+# Adjective-noun combinations with deverbals:
+
+sample_n(deverbs, 4)
+```
+
+These will have to be merged. We will use "adj_noun" as the main tibble to be analyzed.
+
+## Merge and process data:
+
+Merge totals into there:
+
+```{r}
+# Adjective-noun:
+
+adj_noun$noun_N <- totals[match(adj_noun$noun, totals$word), ]$freq
+adj_noun$adj_N <- totals[match(adj_noun$adj, totals$word), ]$freq
+
+# Deverbal adjective-noun:
+
+deverbs$noun_N <- totals[match(deverbs$noun, totals$word), ]$freq
+deverbs$adj_N <- totals[match(deverbs$adj, totals$word), ]$freq
+```
+
+Mark whether an adjective is vertical or size-based:
+
+```{r}
+verts <- c('high', 'higher', 'highest',
+           'low', 'lower', 'lowest')
+
+adj_noun <- mutate(adj_noun,
+                   type = ifelse(adj %in% verts, 'vertical', 'size'))
+```
+
+Show:
+
+```{r}
+sample_n(adj_noun, 4)
+```
+
+For the deverbal ones that's vertical vs. neutral:
+
+```{r}
+neutral <- c('growing', 'shrinking',
+             'increasing', 'decreasing')
+
+deverbs <- mutate(deverbs,
+                  type = ifelse(adj %in% neutral, 'neutral', 'vertical'))
+```
+
+Show:
+
+```{r}
+sample_n(deverbs, 4)
+```
+
+## Compute PMI
+
+Compute total frequency across the entire corpus. Will use this to normalize the frequencies:
+
+```{r}
+N <- sum(totals$freq)
+```
+
+Compute pointwise mutual information, which is:
+
+log(p(x, y) / (p(x) * p(y)))
+
+(from https://en.wikipedia.org/wiki/Pointwise_mutual_information[https://en.wikipedia.org/wiki/Pointwise_mutual_information])
+
+First, we need the normalized frequencies:
+
+```{r}
+# Adjective-noun:
+
+adj_noun <- adj_noun %>% 
+  mutate(freq = ifelse(freq == 0, 0.1, freq)) %>% # not sure if this is legitimate
+  mutate(p_x_y = freq / N,
+         p_x = noun_N / N,
+         p_y = adj_N / N,
+         p_xy = p_x * p_y,
+         pmi = p_x_y / p_xy,
+         pmi = log(pmi)) %>% 
+  select(-(p_x_y:p_xy))
+
+# Deverbal adjective-noun:
+
+deverbs <- deverbs %>% 
+  mutate(freq = ifelse(freq == 0, 0.1, freq)) %>% # not sure if this is legitimate
+  mutate(p_x_y = freq / N,
+         p_x = noun_N / N,
+         p_y = adj_N / N,
+         p_xy = p_x * p_y,
+         pmi = p_x_y / p_xy,
+         pmi = log(pmi)) %>% 
+  select(-(p_x_y:p_xy))
+```
+
+Check:
+
+```{r}
+sample_n(adj_noun, 10)
+sample_n(deverbs, 10)
+```
+
+There are lots of zeros. This happens when the numerator is 0 and the log-transform is performed. Need to think about how to fix this.
+
+Check the distribution of PMI:
+
+```{r, fig.width = 4.5, fig.height = 3}
+adj_noun %>% ggplot(aes(x = pmi)) +
+  geom_density(col = 'black', fill = 'steelblue', alpha = 0.5) +
+  theme_classic()
+```
+
+Same for deverbal:
+
+```{r, fig.width = 4.5, fig.height = 3}
+deverbs %>% ggplot(aes(x = pmi)) +
+  geom_density(col = 'black', fill = 'steelblue', alpha = 0.5) +
+  theme_classic()
+```
+
+## Average PMI for different nouns
+
+Compute the average vertical / size PMI for different nouns:
+
+```{r}
+type_avgs <- adj_noun %>%
+  filter(!is.infinite(pmi)) %>% 
+  group_by(noun, type) %>% 
+  summarize(pmi = mean(pmi, na.rm = TRUE))
+```
+
+Plot this:
+
+```{r, fig.width = 12, fig.height = 6}
+adj_p <- type_avgs %>% ggplot(aes(x = noun,
+                         fill = type,
+                         y = pmi)) +
+  scale_fill_manual(values = c('steelblue', 'goldenrod2')) +
+  geom_col(position = position_dodge(0.6),
+           width = 0.6,
+           col = 'black') +
+  xlab(NULL) +
+  theme_classic() +
+  theme(legend.position = 'top',
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 14))
+
+# Show and save:
+
+adj_p
+ggsave(plot = adj_p, filename = '../figures/adjectives.pdf',
+       width = 16, height = 6)
+```
+
+Compute the average vertical / size PMI for different nouns for the deverbals:
+
+```{r}
+deverb_type_avgs <- deverbs %>%
+  filter(!is.infinite(pmi)) %>% 
+  group_by(noun, type) %>% 
+  summarize(pmi = mean(pmi, na.rm = TRUE))
+```
+
+Plot this:
+
+```{r, fig.width = 12, fig.height = 6}
+deverb_p <- deverb_type_avgs %>% ggplot(aes(x = noun,
+                         fill = type,
+                         y = pmi)) +
+  scale_fill_manual(values = c('steelblue', 'goldenrod2')) +
+  geom_col(position = position_dodge(0.6),
+           width = 0.6,
+           col = 'black') +
+  xlab(NULL) +
+  theme_classic() +
+  theme(legend.position = 'top',
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 14))
+
+# Show and save:
+
+deverb_p
+ggsave(plot = deverb_p, filename = '../figures/deverb_adjectives.pdf',
+       width = 16, height = 6)
+```
+
+## Create a relative PMI score
+
+Create a relative PMI score that looks at the relative degree to which something is more vertical or more size-based (or conversely, more "neutral").
+
+```{r}
+rel_pmi_avgs <- type_avgs %>%
+  pivot_wider(values_from = pmi, names_from = type) %>% 
+  mutate(vertical_bias = vertical - size)
+```
+
+Make a plot of this:
+
+```{r, fig.width = 12, fig.height = 6}
+rel_pmi_p <- rel_pmi_avgs %>% 
+  ggplot(aes(x = reorder(noun, vertical_bias), y = vertical_bias)) +
+  geom_col(fill = 'salmon3') +
+  xlab(NULL) +
+  theme_classic() +
+  theme(legend.position = 'top',
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 14))
+
+# Show and save:
+
+rel_pmi_p
+ggsave(plot = rel_pmi_p, filename = '../figures/relative_pmi.pdf',
+       width = 12, height = 6)
+```
+
+Same for the deverbal ones:
+
+```{r}
+deverb_rel_pmi_avgs <- deverb_type_avgs %>%
+  pivot_wider(values_from = pmi, names_from = type) %>% 
+  mutate(vertical_bias = vertical - neutral)
+```
+
+Make a plot of this:
+
+```{r, fig.width = 12, fig.height = 6}
+deverb_rel_pmi_p <- deverb_rel_pmi_avgs %>% 
+  ggplot(aes(x = reorder(noun, vertical_bias), y = vertical_bias)) +
+  geom_col(fill = 'salmon3') +
+  xlab(NULL) +
+  theme_classic() +
+  theme(legend.position = 'top',
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 14))
+
+# Show and save:
+
+deverb_rel_pmi_p
+ggsave(plot = deverb_rel_pmi_p, filename = '../figures/deverb_relative_pmi.pdf',
+       width = 12, height = 6)
+```
+
+See whether the two are correlated:
+
+```{r}
+deverb_rel_pmi_avgs <- rename(deverb_rel_pmi_avgs,
+                              deverb_bias = vertical_bias)
+
+both_avgs <- rel_pmi_avgs %>% select(-size, -vertical) %>% 
+  right_join(deverb_rel_pmi_avgs) %>% 
+  select(-neutral, -vertical)
+```
+
+Make a plot of this:
+
+```{r, fig.width = 8, fig.height = 6}
+cor_p <- both_avgs %>% 
+  ggplot(aes(x = deverb_bias, y = vertical_bias, label = noun)) +
+  geom_smooth(method = 'lm', col = 'salmon3', fill = 'salmon4') +
+  geom_text() +
+  theme_classic()
+
+# Show and save:
+
+cor_p
+ggsave(plot = cor_p, filename = '../figures/correlation.pdf',
+       width = 6, height = 4)
+```
+
+## Check the correlation for individual lexical items within adjective set
+
+If something prefers high, does it also prefer low; if something prefers, tiny, does it also prefer the other size terms etc.?
+
+```{r}
+# Lemmatize:
+
+adj_noun <- mutate(adj_noun,
+                   item = ifelse(adj %in% c('higher', 'highest'), 'high', adj),
+                   item = ifelse(item %in% c('lower', 'lowest'), 'low', item),
+                   item = ifelse(item %in% c('bigger', 'biggest'), 'big', item),
+                   item = ifelse(item %in% c('smaller', 'smallest'), 'small', item),
+                   item = ifelse(item %in% c('tinier', 'tiniest'), 'tiny', item),
+                   item = ifelse(item %in% c('huger', 'hugest'), 'huge', item),
+                   item = ifelse(item %in% c('larger', 'largest'), 'huge', item))
+```
+
+Get averages per item:
+
+```{r}
+item_avgs <- adj_noun %>% group_by(noun, item) %>% 
+  summarize(pmi = mean(pmi)) %>% ungroup()
+
+item_avgs
+```
+
+Make this into wide format for easier cross-correlations:
+
+```{r}
+item_avgs <- item_avgs %>% pivot_wider(values_from = pmi, names_from = item)
+
+item_avgs
+```
+
+Cross-correlate and order them by vertical versus horizontal:
+
+```{r}
+cor_matrix <- cor(select(item_avgs, big:tiny))
+
+cor_matrix <- cor_matrix[, c('high', 'low', 'big', 'small', 'huge', 'tiny', 'large')]
+cor_matrix <- cor_matrix[c('high', 'low', 'big', 'small', 'huge', 'tiny', 'large'), ]
+```
+
+Show:
+
+```{r}
+round(cor_matrix, 2)
+```
+
+Make a plot of this:
+
+```{r, fig.width = 8, fig.height = 6}
+cor_p <- ggcorrplot(cor_matrix, type = "lower", hc.order = TRUE, 
+           method = 'circle',
+           outline.col = "white",
+           ggtheme = ggplot2::theme_classic,
+           colors = c("#6D9EC1", "white", "#E46726"))
+
+cor_p
+ggsave(plot = cor_p, filename = '../figures/cor_p.pdf')
+```
+
+Append rising and falling in there for now:
+
+```{r}
+big_df <- bind_rows(adj_noun, deverbs) %>%
+  mutate(item = ifelse(adj %in% c('higher', 'highest'), 'high', adj),
+         item = ifelse(item %in% c('lower', 'lowest'), 'low', item),
+         item = ifelse(item %in% c('bigger', 'biggest'), 'big', item),
+         item = ifelse(item %in% c('smaller', 'smallest'), 'small', item),
+         item = ifelse(item %in% c('tinier', 'tiniest'), 'tiny', item),
+         item = ifelse(item %in% c('huger', 'hugest'), 'huge', item),
+         item = ifelse(item %in% c('larger', 'largest'), 'huge', item))
+```
+
+Get averages per item:
+
+```{r}
+item_avgs <- big_df %>% group_by(noun, item) %>% 
+  summarize(pmi = mean(pmi)) %>% ungroup()
+
+item_avgs
+```
+
+Make this into wide format for easier cross-correlations:
+
+```{r}
+item_avgs <- item_avgs %>% pivot_wider(values_from = pmi, names_from = item)
+
+item_avgs
+```
+
+Cross-correlate and plot:
+
+```{r, fig.width = 14, fig.height = 14}
+cor_matrix <- cor(select(item_avgs, ascending:tiny))
+
+cor_p <- ggcorrplot(cor_matrix, type = "lower", hc.order = TRUE, 
+           method = 'circle',
+           outline.col = "white",
+           ggtheme = ggplot2::theme_classic,
+           colors = c("#6D9EC1", "white", "#E46726"))
+
+cor_p
+ggsave(plot = cor_p, filename = '../figures/big_cor_p.pdf')
+```
+
+Show in markdown:
+
+```{r}
+round(cor_matrix, 2)
+```
+
+
